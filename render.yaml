@@ -1,0 +1,18 @@
+# Render.com blueprint: New > Blueprint > pick this repo
+services:
+  - type: web
+    name: spezezy
+    runtime: node
+    plan: starter            # a persistent disk needs a paid plan
+    buildCommand: "echo no build"
+    startCommand: node server.js
+    disk: {name: data, mountPath: /data, sizeGB: 1}
+    envVars:
+      - {key: DATA_DIR, value: /data}
+      - {key: TZ, value: Asia/Kolkata}
+      - {key: VAPID_SUBJECT, value: "mailto:you@example.com"}
+      - {key: VAPID_PUBLIC, sync: false}
+      - {key: VAPID_PRIVATE, sync: false}
+      - {key: WA_TOKEN, sync: false}
+      - {key: WA_PHONE_ID, sync: false}
+      - {key: WA_TEMPLATE, value: spezezy_daily}

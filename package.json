@@ -1,0 +1,1 @@
+{"name":"spezezy-server","version":"1.0.0","private":true,"description":"Spezezy app + class server (WhatsApp daily sender, web push, leaderboard)","main":"server.js","scripts":{"start":"node server.js","keys":"node server.js --gen-keys"},"engines":{"node":">=18"}}
