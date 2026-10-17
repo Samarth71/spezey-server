@@ -23,6 +23,7 @@ async function sendPush(sub){const u=new URL(sub.endpoint);
   const r=await fetch(sub.endpoint,{method:'POST',headers:{TTL:'7200',Urgency:'high',Authorization:'vapid t='+vapidJwt(u.origin)+', k='+VAPID.pub},signal:AbortSignal.timeout(15000)});return r.status}
 // ---------- storage (JSON file, atomic writes) ----------
 let DB={classes:{},students:{}};try{DB=JSON.parse(fs.readFileSync(path.join(DATA,'db.json'),'utf8'))}catch(e){}
+DB.pro=DB.pro||{};
 let dirty=0;const save=()=>{dirty=1},flush=()=>{if(!dirty)return;dirty=0;const t=path.join(DATA,'db.json.tmp');fs.writeFileSync(t,JSON.stringify(DB));fs.renameSync(t,path.join(DATA,'db.json'))};
 setInterval(flush,1000).unref();for(const s of['SIGTERM','SIGINT'])process.on(s,()=>{flush();process.exit(0)});
 // ---------- the app's own generator ----------
@@ -99,9 +100,23 @@ function serveStatic(req,res){let p=decodeURIComponent(new URL(req.url,'http://x
     res.writeHead(200,{...h,'Content-Encoding':'gzip','Content-Length':z.length,Vary:'Accept-Encoding'});res.end(z)})}
 const readBody=req=>new Promise((ok,no)=>{let n=0;const a=[];req.on('data',c=>{n+=c.length;if(n>2e5){no(httpErr(413,'Request too large'));req.destroy()}else a.push(c)});req.on('end',()=>{try{ok(a.length?JSON.parse(Buffer.concat(a)):{})}catch(e){no(httpErr(400,'Invalid JSON'))}});req.on('error',no)});
 const ip=req=>String(req.headers['x-forwarded-for']||req.socket.remoteAddress||'').split(',')[0].trim();
-const teacher=req=>{const k=req.headers['x-teacher-key']||'';const c= Object.values(DB.classes)[0]; return c;}
+const teacher=req=>{const k=req.headers['x-teacher-key']||'';const c=Object.values(DB.classes).find(c=>k&&c.tkh===sha(k));if(!c)throw httpErr(401,'Teacher key not valid');return c};
 const student=req=>{const t=req.headers['x-student-token']||'',s=DB.students[sha(t)];if(!t||!s)throw httpErr(401,'Please join the class again');return s};
+// ---------- Spezezy Pro promo codes: each code works ONE time ----------
+// Only salted hashes of the codes live here (PBKDF2). Override with PRO_HASHES=hash1,hash2 in .env
+const PRO_H=(E.PRO_HASHES||'ffe2d56c17c1f4605d4c049b945ed030af00349f4a91c30cb1116f201d8a16ed,4cc445aa1cddb026380da10d164edd15fcea9c14d0c26a35a4acee24bc1986e0').split(',').map(x=>x.trim()).filter(Boolean);
+const proNorm=c=>{let n=String(c||'').toUpperCase().replace(/[^A-Z0-9]/g,'').replace(/O/g,'0').replace(/[IL]/g,'1');return n};
+const proHash=c=>new Promise((ok,no)=>crypto.pbkdf2(c,'spz-pro-2',150000,32,'sha256',(e,k)=>e?no(e):ok(k.toString('hex'))));
+const admin=req=>{const k=String(req.headers['x-admin-key']||'');if(!E.ADMIN_KEY||k.length<8||k!==E.ADMIN_KEY)throw httpErr(401,'Admin key not valid');};
 const routes={
+ 'POST /api/pro/redeem':async(req,b)=>{rl('p'+ip(req),10,36e5);const n=proNorm(str(b.code,30));if(n.length!==8)throw httpErr(400,'Enter the full code, like AB12-CD34.');
+   const h=await proHash(n);if(!PRO_H.includes(h))throw httpErr(403,'That code is not valid. Check it and try again.');
+   const rec=DB.pro[h],tok=str(b.token,80);
+   if(!rec){const t=crypto.randomBytes(16).toString('hex');DB.pro[h]={th:sha(t),at:Date.now()};save();return{ok:true,token:t}}
+   if(tok&&sha(tok)===rec.th)return{ok:true,token:tok,again:true};
+   throw httpErr(409,'This code was already used on another phone.')},
+ 'GET /api/pro/status':async req=>{admin(req);return{codes:PRO_H.map((h,i)=>({slot:i+1,used:!!DB.pro[h],at:DB.pro[h]?new Date(DB.pro[h].at).toISOString():null}))}},
+ 'POST /api/pro/release':async(req,b)=>{admin(req);const n=proNorm(str(b.code,30)),h=await proHash(n);if(!PRO_H.includes(h))throw httpErr(404,'Unknown code');delete DB.pro[h];save();return{ok:true}},
  'GET /api/health':async()=>({ok:true,wa:WA.mode,push:!!VAPID,tz:process.env.TZ,time:new Date().toISOString()}),
  'GET /api/push/key':async()=>({key:VAPID?VAPID.pub:''}),
  'POST /api/class/create':async(req,b)=>{rl('c'+ip(req),20,36e5);const pin=str(b.pin,40);if(pin.length<4)throw httpErr(400,'PIN needs 4 or more characters');
